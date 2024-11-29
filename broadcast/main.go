@@ -13,7 +13,7 @@ import (
 func main() {
 	n := maelstrom.NewNode()
 	messages := make([]int, 0)
-	topology := make(map[string][]string)
+	neighbors := make([]string, 0)
 	var mu sync.Mutex
 
 	n.Handle("broadcast", func(msg maelstrom.Message) error {
@@ -35,7 +35,9 @@ func main() {
 			messages = append(messages, message)
 			mu.Unlock()
 
-			for _, neighbor := range topology[n.ID()] {
+			// for _, neighbor := range n.NodeIDs() {
+			for _, neighbor := range neighbors {
+				// if neighbor != n.ID()
 				n.Send(neighbor, body)
 			}
 		}
@@ -55,6 +57,7 @@ func main() {
 	})
 
 	n.Handle("topology", func(msg maelstrom.Message) error {
+		// TODO: if there isn't a use for this topology map, just delete logic and use Node.NodeIDs()
 		var body map[string]any
 		if err := json.Unmarshal(msg.Body, &body); err != nil {
 			return err
@@ -65,22 +68,21 @@ func main() {
 			return errors.New("can't convert topology map to type map[string]interface{}")
 		}
 
-		for node, neighbors := range topology_map {
-			neighbors_slice, ok := neighbors.([]interface{})
+		for _, neighbors_interface := range topology_map {
+			neighbors_slice, ok := neighbors_interface.([]interface{})
 			if !ok {
 				return errors.New("can't convert topology map neighbors to slice type")
 			}
 
-			asserted_neighbors := make([]string, len(neighbors_slice))
+			neighbors = make([]string, len(neighbors_slice))
+
 			for index, value := range neighbors_slice {
 				asserted_value, ok := value.(string)
 				if !ok {
 					return errors.New("can't convert neighbor value to type string")
 				}
-				asserted_neighbors[index] = asserted_value
+				neighbors[index] = asserted_value
 			}
-
-			topology[node] = asserted_neighbors
 		}
 
 		return_body := make(map[string]string)
