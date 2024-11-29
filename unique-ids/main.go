@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"os"
 	"strconv"
@@ -16,12 +15,6 @@ func main() {
 	n := maelstrom.NewNode()
 
 	n.Handle("generate", func(msg maelstrom.Message) error {
-		// Unmarshal the message body as an loosely-typed map.
-		var body map[string]any
-		if err := json.Unmarshal(msg.Body, &body); err != nil {
-			return err
-		}
-
 		pid := strconv.Itoa(os.Getpid())
 		ts := strconv.FormatInt(time.Now().UnixNano(), 10)
 		uuid, err := uuid.NewRandom()
@@ -30,10 +23,11 @@ func main() {
 		}
 		guid := strings.Join([]string{pid, ts, uuid.String()}, ".")
 
-		body["type"] = "generate_ok"
-		body["id"] = guid
+		return_body := make(map[string]string)
+		return_body["type"] = "generate_ok"
+		return_body["id"] = guid
 
-		return n.Reply(msg, body)
+		return n.Reply(msg, return_body)
 	})
 
 	if err := n.Run(); err != nil {
