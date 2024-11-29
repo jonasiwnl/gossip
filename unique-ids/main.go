@@ -19,7 +19,7 @@ func main() {
 		ts := strconv.FormatInt(time.Now().UnixNano(), 10)
 		uuid, err := uuid.NewRandom()
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		guid := strings.Join([]string{pid, ts, uuid.String()}, ".")
 
