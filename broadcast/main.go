@@ -6,6 +6,7 @@ import (
 	"log"
 	"slices"
 	"sync"
+	"time"
 
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
@@ -35,11 +36,32 @@ func main() {
 			messages = append(messages, message)
 			mu.Unlock()
 
-			// for _, neighbor := range n.NodeIDs() {
-			for _, neighbor := range neighbors {
-				// if neighbor != n.ID()
-				n.Send(neighbor, body)
-			}
+			// Propagate
+			go func() {
+				unacked := make(map[string]struct{})
+				for _, neighbor := range neighbors {
+					unacked[neighbor] = struct{}{}
+				}
+
+				for len(unacked) != 0 {
+					for neighbor := range unacked {
+						n.RPC(neighbor, body, maelstrom.HandlerFunc(func(msg maelstrom.Message) error {
+							var body map[string]any
+							if err := json.Unmarshal(msg.Body, &body); err != nil {
+								return nil
+							}
+
+							if _, ok := unacked[neighbor]; ok && body["type"] == "broadcast_ok" {
+								delete(unacked, neighbor)
+							}
+
+							return nil
+						}))
+					}
+					// Wait to retry
+					time.Sleep(time.Second)
+				}
+			}()
 		}
 
 		return_body := make(map[string]string)
@@ -57,7 +79,6 @@ func main() {
 	})
 
 	n.Handle("topology", func(msg maelstrom.Message) error {
-		// TODO: if there isn't a use for this topology map, just delete logic and use Node.NodeIDs()
 		var body map[string]any
 		if err := json.Unmarshal(msg.Body, &body); err != nil {
 			return err
@@ -68,7 +89,11 @@ func main() {
 			return errors.New("can't convert topology map to type map[string]interface{}")
 		}
 
-		for _, neighbors_interface := range topology_map {
+		for node, neighbors_interface := range topology_map {
+			if node != n.ID() {
+				continue
+			}
+
 			neighbors_slice, ok := neighbors_interface.([]interface{})
 			if !ok {
 				return errors.New("can't convert topology map neighbors to slice type")
