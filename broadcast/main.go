@@ -15,7 +15,7 @@ func main() {
 	n := maelstrom.NewNode()
 	messages := make([]int, 0)
 	neighbors := make([]string, 0)
-	var mu sync.Mutex
+	var messages_mu sync.Mutex
 
 	n.Handle("broadcast", func(msg maelstrom.Message) error {
 		var body map[string]any
@@ -32,13 +32,14 @@ func main() {
 		is_duplicated_message := slices.Contains(messages, message)
 		// If this message isn't duplicated, i.e. it is _new_, add it to our messages list and propagate
 		if !is_duplicated_message {
-			mu.Lock()
+			messages_mu.Lock()
 			messages = append(messages, message)
-			mu.Unlock()
+			messages_mu.Unlock()
 
 			// Propagate
 			go func() {
 				unacked := make(map[string]struct{})
+				var unacked_mu sync.Mutex
 				for _, neighbor := range neighbors {
 					unacked[neighbor] = struct{}{}
 				}
@@ -51,15 +52,17 @@ func main() {
 								return nil
 							}
 
-							if _, ok := unacked[neighbor]; ok && body["type"] == "broadcast_ok" {
+							if body["type"] == "broadcast_ok" {
+								unacked_mu.Lock()
 								delete(unacked, neighbor)
+								unacked_mu.Unlock()
 							}
 
 							return nil
 						}))
 					}
 					// Wait to retry
-					time.Sleep(time.Second)
+					time.Sleep(10 * time.Millisecond)
 				}
 			}()
 		}
