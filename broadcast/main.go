@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -44,25 +45,43 @@ func main() {
 					unacked[neighbor] = struct{}{}
 				}
 
-				for len(unacked) != 0 {
+				var wg sync.WaitGroup
+				for len(unacked) > 0 {
+					// Make a copy of unacked neighbors to iterate through
+					// TODO: can we improve this
+					unacked_copy := make([]string, 0, len(unacked))
+					unacked_mu.Lock()
 					for neighbor := range unacked {
-						n.RPC(neighbor, body, maelstrom.HandlerFunc(func(msg maelstrom.Message) error {
-							var body map[string]any
-							if err := json.Unmarshal(msg.Body, &body); err != nil {
-								return nil
-							}
-
-							if body["type"] == "broadcast_ok" {
-								unacked_mu.Lock()
-								delete(unacked, neighbor)
-								unacked_mu.Unlock()
-							}
-
-							return nil
-						}))
+						unacked_copy = append(unacked_copy, neighbor)
 					}
-					// Wait to retry
-					time.Sleep(10 * time.Millisecond)
+					unacked_mu.Unlock()
+
+					wg.Add(len(unacked_copy))
+					for _, neighbor := range unacked_copy {
+						go func() {
+							defer wg.Done()
+							ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+							defer cancel()
+							msg, err := n.SyncRPC(ctx, neighbor, body)
+							if err != nil {
+								return
+							}
+
+							var body map[string]any
+							if err = json.Unmarshal(msg.Body, &body); err != nil {
+								return
+							}
+
+							unacked_mu.Lock()
+							if _, ok := unacked[neighbor]; ok && body["type"] == "broadcast_ok" {
+								delete(unacked, neighbor)
+							}
+							unacked_mu.Unlock()
+						}()
+					}
+
+					// Wait for all attempts to broadcast to finish before continuing
+					wg.Wait()
 				}
 			}()
 		}
